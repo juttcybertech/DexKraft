@@ -68,10 +68,20 @@ class App(ctk.CTk):
             # Optionally create it or just warn
             pass
 
+    def set_exec_permission(self, path):
+        """Ensure the file at path has executable permissions on non-Windows systems."""
+        if os.name != 'nt' and os.path.exists(path):
+            try:
+                st = os.stat(path)
+                os.chmod(path, st.st_mode | 0o111)
+            except Exception as e:
+                print(f"Warning: Could not set executable permission for {path}: {e}")
+
     def get_openssl_path(self):
-        # 1. Check local openssl.exe
-        local_openssl = os.path.join(os.path.dirname(__file__), 'openssl', 'openssl.exe')
+        # 1. Check local openssl
+        local_openssl = os.path.join(os.path.dirname(__file__), 'openssl', 'openssl.exe' if os.name == 'nt' else 'openssl')
         if os.path.exists(local_openssl):
+            self.set_exec_permission(local_openssl)
             return local_openssl
         # 2. Check system
         import shutil
@@ -203,12 +213,13 @@ class App(ctk.CTk):
             dex_name = os.path.splitext(os.path.basename(path))[0]
             jadx_out = os.path.join(dex_dir, f"{dex_name}_jadx_out")
             os.makedirs(jadx_out, exist_ok=True)
-            jadx = self.find_tool("jadx", "jadx/bin/jadx.bat")
+            jadx = self.find_tool("jadx", os.path.join("jadx", "bin", "jadx.bat" if os.name == 'nt' else "jadx"))
             if not jadx:
                 messagebox.showerror("Error", "JADX not found. Please restart the app to run the dependency setup.")
                 return
 
             def run_jadx_task():
+                self.set_exec_permission(jadx)
                 self.editor_text.insert("end", f"\nDecompiling {os.path.splitext(path)[1].upper()} with JADX...\nOutput: {jadx_out}\n")
                 # Kotlin-aware flags: --deobf-parse-kotlin-metadata and --use-kotlin-methods-for-var-names apply
                 cmd = [jadx, '-d', jadx_out, '--show-bad-code', '--deobf', '--deobf-parse-kotlin-metadata', '--use-kotlin-methods-for-var-names', 'apply', path]
@@ -403,11 +414,13 @@ class App(ctk.CTk):
     def check_dependencies(self):
         missing = []
         # Check JADX
-        jadx_path = os.path.join(os.path.dirname(__file__), "jadx", "bin", "jadx.bat")
+        jadx_rel = os.path.join("jadx", "bin", "jadx.bat" if os.name == 'nt' else "jadx")
+        jadx_path = os.path.join(os.path.dirname(__file__), jadx_rel)
         if not os.path.exists(jadx_path):
             missing.append("JADX")
         # Check Apktool
-        apktool_path = os.path.join(os.path.dirname(__file__), "apktool", "apktool.bat")
+        apktool_rel = os.path.join("apktool", "apktool.bat" if os.name == 'nt' else "apktool")
+        apktool_path = os.path.join(os.path.dirname(__file__), apktool_rel)
         apktool_jar = os.path.join(os.path.dirname(__file__), "apktool", "apktool.jar")
         if not os.path.exists(apktool_path) or not os.path.exists(apktool_jar):
             missing.append("Apktool")
@@ -466,9 +479,15 @@ class App(ctk.CTk):
                 self.download_file(jar_url, jar_path)
                 
                 # Wrapper
-                wrapper_url = "https://raw.githubusercontent.com/iBotPeaches/Apktool/master/scripts/windows/apktool.bat"
-                wrapper_path = os.path.join(apktool_dir, "apktool.bat")
+                if os.name == 'nt':
+                    wrapper_url = "https://raw.githubusercontent.com/iBotPeaches/Apktool/master/scripts/windows/apktool.bat"
+                    wrapper_path = os.path.join(apktool_dir, "apktool.bat")
+                else:
+                    wrapper_url = "https://raw.githubusercontent.com/iBotPeaches/Apktool/master/scripts/linux/apktool"
+                    wrapper_path = os.path.join(apktool_dir, "apktool")
+                
                 self.download_file(wrapper_url, wrapper_path)
+                self.set_exec_permission(wrapper_path)
             
             self.update_setup_status("Setup Complete!")
             self.setup_window.after(1000, self.setup_window.destroy)
@@ -537,10 +556,12 @@ class App(ctk.CTk):
 
         def task():
             self.log(self.jadx_log, "Checking JADX...")
-            jadx = self.find_tool("jadx", "jadx/bin/jadx.bat")
+            jadx = self.find_tool("jadx", os.path.join("jadx", "bin", "jadx.bat" if os.name == 'nt' else "jadx"))
             if not jadx:
                 self.log(self.jadx_log, "ERROR: JADX not found. Please restart app to run setup.")
                 return
+            
+            self.set_exec_permission(jadx)
 
             # Kotlin-aware flags: --deobf-parse-kotlin-metadata and --use-kotlin-methods-for-var-names apply
             cmd = [jadx, '-d', out, '--show-bad-code', '--deobf', '--deobf-parse-kotlin-metadata', '--use-kotlin-methods-for-var-names', 'apply', apk]
@@ -562,10 +583,12 @@ class App(ctk.CTk):
 
         def task():
             self.log(self.mod_log, "Checking Apktool...")
-            tool = self.find_tool("apktool", "apktool/apktool.bat")
+            tool = self.find_tool("apktool", os.path.join("apktool", "apktool.bat" if os.name == 'nt' else "apktool"))
             if not tool:
                 self.log(self.mod_log, "ERROR: Apktool not found. Please restart app to run setup.")
                 return
+            
+            self.set_exec_permission(tool)
             
             # apktool d <apk> -o <out> -f
             cmd = [tool, 'd', apk, '-o', out, '-f']
@@ -581,8 +604,10 @@ class App(ctk.CTk):
         if not folder: return
 
         def task():
-            tool = self.find_tool("apktool", "apktool/apktool.bat")
+            tool = self.find_tool("apktool", os.path.join("apktool", "apktool.bat" if os.name == 'nt' else "apktool"))
             if not tool: return
+            
+            self.set_exec_permission(tool)
             
             # apktool b <folder> -o <folder>/dist/modded.apk
             # usually apktool b <folder> output goes to <folder>/dist/
@@ -593,7 +618,15 @@ class App(ctk.CTk):
             dist_path = os.path.join(folder, "dist")
             if os.path.exists(dist_path):
                  self.log(self.mod_log, f"Build Success! Output in: {dist_path}")
-                 os.startfile(dist_path)
+                 try:
+                     if os.name == 'nt':
+                         os.startfile(dist_path)
+                     elif platform.system() == 'Darwin':
+                         subprocess.run(['open', dist_path])
+                     else:
+                         subprocess.run(['xdg-open', dist_path])
+                 except Exception:
+                     pass
             else:
                  self.log(self.mod_log, "Build failed. Check errors above.")
 
